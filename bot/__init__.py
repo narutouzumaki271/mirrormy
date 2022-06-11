@@ -13,7 +13,6 @@ from threading import Thread, Lock
 from dotenv import load_dotenv
 from pyrogram import Client, enums
 from asyncio import get_event_loop
-from megasdkrestclient import MegaSdkRestClient, errors as mega_err
 
 main_loop = get_event_loop()
 
@@ -28,22 +27,6 @@ basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=INFO)
 
 LOGGER = getLogger(__name__)
-
-CONFIG_FILE_URL = environ.get('CONFIG_FILE_URL')
-try:
-    if len(CONFIG_FILE_URL) == 0:
-        raise TypeError
-    try:
-        res = rget(CONFIG_FILE_URL)
-        if res.status_code == 200:
-            with open('config.env', 'wb+') as f:
-                f.write(res.content)
-        else:
-            log_error(f"Failed to download config.env {res.status_code}")
-    except Exception as e:
-        log_error(f"CONFIG_FILE_URL: {e}")
-except:
-    pass
 
 load_dotenv('config.env', override=True)
 
@@ -65,31 +48,21 @@ try:
         log_error(f"NETRC_URL: {e}")
 except:
     pass
-
 try:
-    TORRENT_TIMEOUT = getConfig('TORRENT_TIMEOUT')
-    if len(TORRENT_TIMEOUT) == 0:
+    SERVER_PORT = getConfig('SERVER_PORT')
+    if len(SERVER_PORT) == 0:
         raise KeyError
-    TORRENT_TIMEOUT = int(TORRENT_TIMEOUT)
 except:
-    TORRENT_TIMEOUT = None
+    SERVER_PORT = 80
 
-PORT = environ.get('PORT')
-Popen([f"gunicorn web.wserver:app --bind 0.0.0.0:{PORT}"], shell=True)
-srun(["last-api", "-d", "--profile=."])
+Popen([f"gunicorn web.wserver:app --bind 0.0.0.0:{SERVER_PORT}"], shell=True)
+srun(["qbittorrent-nox", "-d", "--profile=."])
 if not ospath.exists('.netrc'):
     srun(["touch", ".netrc"])
 srun(["cp", ".netrc", "/root/.netrc"])
 srun(["chmod", "600", ".netrc"])
-trackers = check_output(["curl -Ns https://raw.githubusercontent.com/XIU2/TrackersListCollection/master/all.txt https://ngosang.github.io/trackerslist/trackers_all_http.txt https://newtrackon.com/api/all https://raw.githubusercontent.com/hezhijie0327/Trackerslist/main/trackerslist_tracker.txt | awk '$0' | tr '\n\n' ','"], shell=True).decode('utf-8').rstrip(',')
-if TORRENT_TIMEOUT is not None:
-    with open("a2c.conf", "a+") as a:
-        a.write(f"bt-stop-timeout={TORRENT_TIMEOUT}\n")
-with open("a2c.conf", "a+") as a:
-    a.write(f"bt-tracker=[{trackers}]")
-srun(["extra-api", "--conf-path=/usr/src/app/a2c.conf"])
-alive = Popen(["python3", "alive.py"])
-sleep(0.5)
+srun(["chmod", "+x", "aria.sh"])
+srun(["./aria.sh"], shell=True)
 
 Interval = []
 DRIVES_NAMES = []
@@ -133,7 +106,7 @@ AUTHORIZED_CHATS = set()
 SUDO_USERS = set()
 AS_DOC_USERS = set()
 AS_MEDIA_USERS = set()
-EXTENTION_FILTER = set()
+EXTENTION_FILTER = set(['.torrent'])
 
 try:
     aid = getConfig('AUTHORIZED_CHATS')
@@ -169,7 +142,7 @@ try:
     TELEGRAM_API = getConfig('TELEGRAM_API')
     TELEGRAM_HASH = getConfig('TELEGRAM_HASH')
 except:
-    log_error("One or more env variables missing! Exiting now")
+    LOGGER.error("One or more env variables missing! Exiting now")
     exit(1)
 
 LOGGER.info("Generating BOT_SESSION_STRING")
@@ -181,12 +154,13 @@ try:
         raise KeyError
     rss_session = Client(name='rss_session', api_id=int(TELEGRAM_API), api_hash=TELEGRAM_HASH, session_string=USER_SESSION_STRING, parse_mode=enums.ParseMode.HTML, no_updates=True)
 except:
+    USER_SESSION_STRING = None
     rss_session = None
 
 def aria2c_init():
     try:
         log_info("Initializing Aria2c")
-        link = "https://linuxmint.com/torrents/lmde-5-cinnamon-64bit.iso.torrent"
+        link = "https://releases.ubuntu.com/21.10/ubuntu-21.10-desktop-amd64.iso.torrent"
         dire = DOWNLOAD_DIR.rstrip("/")
         aria2.add_uris([link], {'dir': dire})
         sleep(3)
@@ -197,42 +171,24 @@ def aria2c_init():
     except Exception as e:
         log_error(f"Aria2c initializing error: {e}")
 Thread(target=aria2c_init).start()
+sleep(1.5)
 
 try:
-    MEGA_KEY = getConfig('MEGA_API_KEY')
-    if len(MEGA_KEY) == 0:
+    MEGA_API_KEY = getConfig('MEGA_API_KEY')
+    if len(MEGA_API_KEY) == 0:
         raise KeyError
 except:
-    MEGA_KEY = None
-    LOGGER.info('MEGA_API_KEY not provided!')
-if MEGA_KEY is not None:
-    # Start megasdkrest binary
-    Popen(["megasdkrest", "--apikey", MEGA_KEY])
-    sleep(3)  # Wait for the mega server to start listening
-    mega_client = MegaSdkRestClient('http://localhost:6090')
-    try:
-        MEGA_USERNAME = getConfig('MEGA_EMAIL_ID')
-        MEGA_PASSWORD = getConfig('MEGA_PASSWORD')
-        if len(MEGA_USERNAME) > 0 and len(MEGA_PASSWORD) > 0:
-            try:
-                mega_client.login(MEGA_USERNAME, MEGA_PASSWORD)
-            except mega_err.MegaSdkRestClientException as e:
-                log_error(e.message['message'])
-                exit(0)
-        else:
-            log_info("Mega API KEY provided but credentials not provided. Starting mega in anonymous mode!")
-    except:
-        log_info("Mega API KEY provided but credentials not provided. Starting mega in anonymous mode!")
-else:
-    sleep(1.5)
-
+    log_warning('MEGA API KEY not provided!')
+    MEGA_API_KEY = None
 try:
-    BASE_URL = getConfig('BASE_URL_OF_BOT').rstrip("/")
-    if len(BASE_URL) == 0:
+    MEGA_EMAIL_ID = getConfig('MEGA_EMAIL_ID')
+    MEGA_PASSWORD = getConfig('MEGA_PASSWORD')
+    if len(MEGA_EMAIL_ID) == 0 or len(MEGA_PASSWORD) == 0:
         raise KeyError
 except:
-    log_warning('BASE_URL_OF_BOT not provided!')
-    BASE_URL = None
+    log_warning('MEGA Credentials not provided!')
+    MEGA_EMAIL_ID = None
+    MEGA_PASSWORD = None
 try:
     DB_URI = getConfig('DATABASE_URL')
     if len(DB_URI) == 0:
@@ -293,6 +249,41 @@ try:
 except:
     CMD_INDEX = ''
 try:
+    TORRENT_DIRECT_LIMIT = getConfig('TORRENT_DIRECT_LIMIT')
+    if len(TORRENT_DIRECT_LIMIT) == 0:
+        raise KeyError
+    TORRENT_DIRECT_LIMIT = float(TORRENT_DIRECT_LIMIT)
+except:
+    TORRENT_DIRECT_LIMIT = None
+try:
+    CLONE_LIMIT = getConfig('CLONE_LIMIT')
+    if len(CLONE_LIMIT) == 0:
+        raise KeyError
+    CLONE_LIMIT = float(CLONE_LIMIT)
+except:
+    CLONE_LIMIT = None
+try:
+    MEGA_LIMIT = getConfig('MEGA_LIMIT')
+    if len(MEGA_LIMIT) == 0:
+        raise KeyError
+    MEGA_LIMIT = float(MEGA_LIMIT)
+except:
+    MEGA_LIMIT = None
+try:
+    STORAGE_THRESHOLD = getConfig('STORAGE_THRESHOLD')
+    if len(STORAGE_THRESHOLD) == 0:
+        raise KeyError
+    STORAGE_THRESHOLD = float(STORAGE_THRESHOLD)
+except:
+    STORAGE_THRESHOLD = None
+try:
+    ZIP_UNZIP_LIMIT = getConfig('ZIP_UNZIP_LIMIT')
+    if len(ZIP_UNZIP_LIMIT) == 0:
+        raise KeyError
+    ZIP_UNZIP_LIMIT = float(ZIP_UNZIP_LIMIT)
+except:
+    ZIP_UNZIP_LIMIT = None
+try:
     RSS_CHAT_ID = getConfig('RSS_CHAT_ID')
     if len(RSS_CHAT_ID) == 0:
         raise KeyError
@@ -306,7 +297,14 @@ try:
     RSS_DELAY = int(RSS_DELAY)
 except:
     RSS_DELAY = 900
- try:
+try:
+    TORRENT_TIMEOUT = getConfig('TORRENT_TIMEOUT')
+    if len(TORRENT_TIMEOUT) == 0:
+        raise KeyError
+    TORRENT_TIMEOUT = int(TORRENT_TIMEOUT)
+except:
+    TORRENT_TIMEOUT = None
+try:
     BUTTON_FOUR_NAME = getConfig('BUTTON_FOUR_NAME')
     BUTTON_FOUR_URL = getConfig('BUTTON_FOUR_URL')
     if len(BUTTON_FOUR_NAME) == 0 or len(BUTTON_FOUR_URL) == 0:
@@ -361,10 +359,25 @@ try:
 except:
     WEB_PINCODE = False
 try:
+    SHORTENER = getConfig('SHORTENER')
+    SHORTENER_API = getConfig('SHORTENER_API')
+    if len(SHORTENER) == 0 or len(SHORTENER_API) == 0:
+        raise KeyError
+except:
+    SHORTENER = None
+    SHORTENER_API = None
+try:
     IGNORE_PENDING_REQUESTS = getConfig("IGNORE_PENDING_REQUESTS")
     IGNORE_PENDING_REQUESTS = IGNORE_PENDING_REQUESTS.lower() == 'true'
 except:
     IGNORE_PENDING_REQUESTS = False
+try:
+    BASE_URL = getConfig('BASE_URL_OF_BOT').rstrip("/")
+    if len(BASE_URL) == 0:
+        raise KeyError
+except:
+    log_warning('BASE_URL_OF_BOT not provided!')
+    BASE_URL = None
 try:
     AS_DOCUMENT = getConfig('AS_DOCUMENT')
     AS_DOCUMENT = AS_DOCUMENT.lower() == 'true'
